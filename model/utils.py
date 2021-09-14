@@ -138,6 +138,8 @@ class VideoDataLoader(data.Dataset):
                 self.videos[video_name]['frame'].sort()
                 self.videos[video_name]['length'] = len(
                     self.videos[video_name]['frame'])
+            with open(file_name, 'wb+') as f:
+                pickle.dump(self.videos, f)
 
     def get_all_samples(self):
         frames = {}
@@ -158,7 +160,9 @@ class VideoDataLoader(data.Dataset):
 
         video_name = self.video_names[index]
         length = self.videos[video_name]['length'] - self._time_step
+        # 把 video_name 等分成 self.num_segs 个 clip，从中采样 self.batch_size 个 clip
         seg_ind = random.sample(range(0, self.num_segs), self.batch_size)
+        # 随机选择 clip 的开始位置
         frame_ind = random.sample(range(0, length // self.num_segs), 1)
 
         batch = []

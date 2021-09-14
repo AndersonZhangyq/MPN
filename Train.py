@@ -1,4 +1,5 @@
-from utils import AverageMeter, VideoDataLoader
+from utils import AverageMeter
+from model.utils import VideoDataLoader
 import numpy as np
 import os
 import sys
@@ -30,6 +31,7 @@ import random
 from tqdm import tqdm
 import argparse
 import warnings
+from mmcv.cnn import get_model_complexity_info
 
 warnings.filterwarnings("ignore")
 
@@ -95,7 +97,7 @@ parser.add_argument('--alpha',
                     help='weight for the anomality score')
 parser.add_argument('--num_workers',
                     type=int,
-                    default=8,
+                    default=0,
                     help='number of workers for the train loader')
 parser.add_argument('--num_workers_test',
                     type=int,
@@ -107,7 +109,7 @@ parser.add_argument('--dataset_type',
                     help='type of dataset: ped2, avenue, shanghai')
 parser.add_argument('--dataset_path',
                     type=str,
-                    default='.data/',
+                    default='data/',
                     help='directory of data')
 parser.add_argument('--exp_dir',
                     type=str,
@@ -157,6 +159,8 @@ train_batch = data.DataLoader(train_dataset,
 model = convAE(args.c, args.t_length, args.psize, args.fdim[0], args.pdim[0])
 model.cuda()
 
+get_model_complexity_info(model, (12, 256, 256) ,print_per_layer_stat=True)
+# exit(0)
 params_encoder = list(model.encoder.parameters())
 params_decoder = list(model.decoder.parameters())
 params_proto = list(model.prototype.parameters())
@@ -175,7 +179,7 @@ if os.path.exists(args.resume):
     model.load_state_dict(checkpoint['state_dict'].state_dict())
     optimizer_D.load_state_dict(checkpoint['optimizer_D'])
 
-if len(args.gpus[0]) > 1:
+if args.gpus is not None and len(args.gpus[0]) > 1:
     model = nn.DataParallel(model)
 
 # Report the training process
@@ -249,7 +253,7 @@ for epoch in range(start_epoch, args.epochs):
     # Save the model
     if epoch % 100 == 0:
 
-        if len(args.gpus[0]) > 1:
+        if args.gpus is not None and len(args.gpus[0]) > 1:
             model_save = model.module
         else:
             model_save = model

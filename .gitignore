@@ -1,0 +1,6 @@
+data/
+*.zip
+.vscode/
+*.pyc
+exp/
+MPN_model/

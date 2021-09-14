@@ -1,13 +1,7 @@
 import torch
-import torch.autograd as ag
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-import math
-import functools
-import random
 import pandas as pd
-import numpy as np
 import matplotlib
 
 matplotlib.use("Agg")
@@ -61,14 +55,14 @@ class Meta_Prototype(nn.Module):
         self.key_dim = key_dim
         self.temp_update = temp_update
         self.temp_gather = temp_gather
-        #multi-head
+        # multi-head
         self.Mheads = nn.Linear(key_dim, proto_size, bias=False)
         # self.Dim_reduction = nn.Linear(key_dim, feature_dim)
         # self.softmax = nn.Softmax(dim=1)
         self.shrink_thres = shrink_thres
 
     def get_score(self, pro, query):
-        bs, n, d = query.size()  #n=w*h
+        bs, n, d = query.size()  # n=w*h
         bs, m, d = pro.size()
         # import pdb;pdb.set_trace()
         score = torch.bmm(query, pro.permute(0, 2, 1))  # b X h X w X m
@@ -86,9 +80,9 @@ class Meta_Prototype(nn.Module):
         _, _, h_, w_ = query.size()
         query = query.permute(0, 2, 3, 1)  # b X h X w X d
         query = query.reshape((batch_size, -1, self.feature_dim))
-        #train
+        # train
         if train:
-            if weights == None:
+            if weights is None:
                 multi_heads_weights = self.Mheads(key)
             else:
                 multi_heads_weights = linear(
@@ -116,9 +110,9 @@ class Meta_Prototype(nn.Module):
                 (batch_size, self.feature_dim, h_, w_))
             return updated_query, protos, fea_loss, cst_loss, dis_loss
 
-        #test
+        # test
         else:
-            if weights == None:
+            if weights is None:
                 multi_heads_weights = self.Mheads(key)
             else:
                 multi_heads_weights = linear(
@@ -198,7 +192,7 @@ class Meta_Prototype(nn.Module):
 
             _, gathering_indices = torch.topk(softmax_score_proto, 2, dim=-1)
 
-            #1st closest memories
+            # 1st closest memories
             pos = torch.gather(
                 keys, 1, gathering_indices[:, :, :1].repeat((1, 1, dims)))
 

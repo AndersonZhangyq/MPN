@@ -1,11 +1,7 @@
-import numpy as np
-
-import torch
 from torch.nn import functional as F
 '''
-Functional definitions of common layers
-Useful for when weights are exposed rather 
-than being contained in modules
+Functional definitions of common layers.
+Useful for when weights are exposed rather than being contained in modules
 '''
 
 
@@ -34,6 +30,27 @@ def conv_transpose2d(input,
                      dilation=1,
                      groups=1):
     return F.conv_transpose2d(input, weight.cuda(), bias.cuda(), stride,
+                              padding, dilation, groups)
+
+
+def conv3d(input,
+           weight,
+           bias=None,
+           stride=1,
+           padding=0,
+           dilation=1,
+           groups=1):
+    return F.conv3d(input, weight, bias, stride, padding, dilation, groups)
+
+
+def conv_transpose3d(input,
+                     weight,
+                     bias=None,
+                     stride=1,
+                     padding=0,
+                     dilation=1,
+                     groups=1):
+    return F.conv_transpose3d(input, weight.cuda(), bias.cuda(), stride,
                               padding, dilation, groups)
 
 
