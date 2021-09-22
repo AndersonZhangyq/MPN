@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 from torch.autograd import Variable
 from collections import OrderedDict
-from .meta_prototype import Meta_Prototype
+from .meta_prototype_3d import Meta_Prototype_3d
 from .layers import conv3d, relu
 from matplotlib import pyplot as plt
 import pandas as pd
@@ -20,12 +20,14 @@ class Encoder(torch.nn.Module):
                                 out_channels=intOutput,
                                 kernel_size=3,
                                 stride=1,
-                                padding=1), torch.nn.ReLU(inplace=False),
+                                padding=1), torch.nn.BatchNorm3d(intOutput),
+                torch.nn.ReLU(inplace=False),
                 torch.nn.Conv3d(in_channels=intOutput,
                                 out_channels=intOutput,
                                 kernel_size=3,
                                 stride=1,
-                                padding=1), torch.nn.ReLU(inplace=False))
+                                padding=1), torch.nn.BatchNorm3d(intOutput),
+                torch.nn.ReLU(inplace=False))
 
         def Basic_(intInput, intOutput):
             return torch.nn.Sequential(
@@ -33,7 +35,7 @@ class Encoder(torch.nn.Module):
                                 out_channels=intOutput,
                                 kernel_size=3,
                                 stride=1,
-                                padding=1),
+                                padding=1), torch.nn.BatchNorm3d(intOutput),
                 torch.nn.ReLU(inplace=False),
                 torch.nn.Conv3d(in_channels=intOutput,
                                 out_channels=intOutput,
@@ -42,7 +44,7 @@ class Encoder(torch.nn.Module):
                                 padding=1),
             )
 
-        self.moduleConv1 = Basic(n_channel * (t_length - 1), 64)
+        self.moduleConv1 = Basic(n_channel, 64)
         self.modulePool1 = torch.nn.MaxPool3d(kernel_size=2, stride=2)
 
         self.moduleConv2 = Basic(64, 128)
@@ -154,10 +156,11 @@ class convAE(torch.nn.Module):
 
         self.encoder = Encoder(t_length, n_channel)
         self.decoder = Decoder_new(t_length, n_channel)
-        self.prototype = Meta_Prototype(proto_size, feature_dim, key_dim,
+        self.prototype = Meta_Prototype_3d(proto_size, feature_dim, key_dim,
                                         temp_update, temp_gather)
         # output_head
         self.ohead = Outhead(128, n_channel, 64)
+        self.temporal_head = torch.nn.Linear(t_length - 1, 1)
 
     def set_learnable_params(self, layers):
         for k, p in self.named_parameters():
@@ -213,8 +216,10 @@ class convAE(torch.nn.Module):
                            stride=1,
                            padding=1)
                 output = F.tanh(x)
+            temporal_output = output.transpose(2, -1)
+            temporal_output = self.temporal_head(temporal_output).squeeze(-1)
 
-            return output, fea, updated_fea, keys, fea_loss, cst_loss, dis_loss
+            return temporal_output, fea, updated_fea, keys, fea_loss, cst_loss, dis_loss
 
         # test
         else:

@@ -308,3 +308,37 @@ class MetaDataLoader(data.Dataset):
 
     def __len__(self):
         return len(self.video_names)
+
+
+class Video3DDataset(VideoDataLoader):
+
+    def __getitem__(self, index):
+
+        video_name = self.video_names[index]
+        length = self.videos[video_name]['length'] - self._time_step
+        # 把 video_name 等分成 self.num_segs 个 clip，从中采样 self.batch_size 个 clip
+        seg_ind = random.sample(range(0, self.num_segs), self.batch_size)
+        # 随机选择 clip 的开始位置
+        frame_ind = random.sample(range(0, length // self.num_segs), 1)
+
+        previous_frames = []
+        predict_frames = []
+        for j in range(self.batch_size):
+            frame_name = seg_ind[j] * (length // self.num_segs) + frame_ind[0]
+            cur_batch = []
+            for i in range(self._time_step):
+                image = np_load_frame(
+                    self.videos[video_name]['frame'][frame_name + i],
+                    self._resize_height, self._resize_width)
+                print("prev: {}\n".format(frame_name + i))
+                if self.transform is not None:
+                    cur_batch.append(self.transform(image))
+            previous_frames.append(cur_batch)
+            for i in range(self._num_pred):
+                image = np_load_frame(
+                    self.videos[video_name]['frame'][frame_name + self._time_step + i],
+                    self._resize_height, self._resize_width)
+                print("pred: {}\n".format(frame_name + self._time_step + i))
+                if self.transform is not None:
+                    predict_frames.append(self.transform(image))
+        return {"prev": previous_frames, "pred": predict_frames}

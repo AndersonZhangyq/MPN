@@ -322,7 +322,7 @@ if os.path.isdir(snapshot_dir):
             psnr_list = file['psnr'].item()
             feature_distance_list = file['feaRe'].item()
             anomaly_score_total_list = []
-           if args.dataset_type =='avenue':
+            if args.dataset_type =='avenue':
                 ae = []
                 me = []
                 for video in sorted(videos_list):

@@ -1,33 +1,17 @@
 from utils import AverageMeter
-from model.utils import VideoDataLoader
+from model.utils import Video3DDataset
 import numpy as np
 import os
 import sys
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-import torchvision
-import torch.nn.init as init
 import torch.utils.data as data
-import torch.utils.data.dataset as dataset
-import torchvision.datasets as dset
 import torchvision.transforms as transforms
 from torch.autograd import Variable
-import torchvision.utils as v_utils
 import matplotlib
-from datetime import datetime
+
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import cv2
-import math
-from collections import OrderedDict
-import copy
-import time
-from model.utils import DataLoader
-from model.base_model import *
-from sklearn.metrics import roc_auc_score
-import random
+from model.base_model_3d import *
 from tqdm import tqdm
 import argparse
 import warnings
@@ -47,7 +31,7 @@ parser.add_argument('--test_batch_size',
                     help='batch size for test')
 parser.add_argument('--epochs',
                     type=int,
-                    default=60,
+                    default=1000,
                     help='number of epochs for training')
 parser.add_argument('--loss_fra_reconstruct',
                     type=float,
@@ -73,7 +57,7 @@ parser.add_argument('--lr_D',
                     help='initial learning rate for parameters')
 parser.add_argument('--t_length',
                     type=int,
-                    default=5,
+                    default=9,
                     help='length of the frame sequences')
 parser.add_argument('--segs',
                     type=int,
@@ -136,7 +120,7 @@ torch.backends.cudnn.enabled = True  # make sure to use cudnn for computational 
 train_folder = args.dataset_path + args.dataset_type + "/training/frames"
 
 # Loading dataset
-train_dataset = VideoDataLoader(train_folder,
+train_dataset = Video3DDataset(train_folder,
                                 args.dataset_type,
                                 transforms.Compose([
                                     transforms.ToTensor(),
@@ -159,7 +143,7 @@ train_batch = data.DataLoader(train_dataset,
 model = convAE(args.c, args.t_length, args.psize, args.fdim[0], args.pdim[0])
 model.cuda()
 
-get_model_complexity_info(model, (12, 256, 256), print_per_layer_stat=True)
+# get_model_complexity_info(model, (3, 16, 256, 256), print_per_layer_stat=True)
 # exit(0)
 params_encoder = list(model.encoder.parameters())
 params_decoder = list(model.decoder.parameters())
@@ -183,7 +167,7 @@ if args.gpus is not None and len(args.gpus[0]) > 1:
     model = nn.DataParallel(model)
 
 # Report the training process
-log_dir = os.path.join('./exp_2d', args.dataset_type, args.exp_dir)
+log_dir = os.path.join('./exp_3d', args.dataset_type, args.exp_dir)
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
 
@@ -200,19 +184,21 @@ loss_dis = AverageMeter()
 
 model.train()
 
-for epoch in tqdm(range(start_epoch, args.epochs)):
+for epoch in range(start_epoch, args.epochs):
     labels_list = []
 
     pbar = tqdm(total=len(train_batch))
-    start_time = datetime.now()
-    for j, (imgs) in enumerate(train_batch):
-        imgs = Variable(imgs).cuda()
-        imgs = imgs.view(args.batch_size, -1, imgs.shape[-2], imgs.shape[-1])
+    for j, (batch_data) in enumerate(train_batch):
+        prev_imgs = batch_data['prev']
+        prev_imgs = torch.stack([torch.cat(ele) for ele in prev_imgs]).transpose(1, 2)
+        pred_imgs = batch_data['pred']
+        pred_imgs = torch.cat(pred_imgs).cuda()
+        imgs = Variable(prev_imgs).cuda() # batch_size x channel x frame_len x h x w
 
         outputs, _, _, _, fea_loss, _, dis_loss = model.forward(
-            imgs[:, 0:12], None, True)
+            imgs, None, True)
         optimizer_D.zero_grad()
-        loss_pixel = torch.mean(loss_func_mse(outputs, imgs[:, 12:]))
+        loss_pixel = torch.mean(loss_func_mse(outputs, pred_imgs))
         fea_loss = fea_loss.mean()
         dis_loss = dis_loss.mean()
         loss_D = args.loss_fra_reconstruct * loss_pixel + args.loss_fea_reconstruct * fea_loss + args.loss_distinguish * dis_loss
@@ -237,15 +223,14 @@ for epoch in tqdm(range(start_epoch, args.epochs)):
         })
         pbar.update(1)
 
-    end_time = datetime.now()
     print('----------------------------------------')
     print('Epoch:', epoch + 1)
     print('Lr: {:.6f}'.format(optimizer_D.param_groups[-1]['lr']))
     print('PRe: {:.6f}({:.4f})'.format(loss_pixel.item(), loss_pix.avg))
     print('FRe: {:.6f}({:.4f})'.format(fea_loss.item(), loss_fea.avg))
     print('Dist: {:.6f}({:.4f})'.format(dis_loss.item(), loss_dis.avg))
-    print('Time: {}'.format(end_time - start_time))
     print('----------------------------------------')
+
     pbar.close()
 
     loss_pix.reset()
@@ -253,7 +238,7 @@ for epoch in tqdm(range(start_epoch, args.epochs)):
     loss_dis.reset()
 
     # Save the model
-    if epoch % 10 == 0:
+    if epoch % 100 == 0:
 
         if args.gpus is not None and len(args.gpus[0]) > 1:
             model_save = model.module
@@ -268,7 +253,6 @@ for epoch in tqdm(range(start_epoch, args.epochs)):
         torch.save(state, os.path.join(log_dir,
                                        'model_' + str(epoch) + '.pth'))
 
-
 if args.gpus is not None and len(args.gpus[0]) > 1:
     model_save = model.module
 else:
@@ -280,6 +264,7 @@ state = {
 }
 torch.save(state, os.path.join(log_dir,
                                'model_' + str(epoch) + '.pth'))
+
 print('Training is finished')
 if not args.debug:
     sys.stdout = orig_stdout

@@ -86,7 +86,7 @@ parser.add_argument('--th',
                     help='threshold for test updating')
 parser.add_argument('--num_workers_test',
                     type=int,
-                    default=8,
+                    default=0,
                     help='number of workers for the test loader')
 parser.add_argument('--dataset_type',
                     type=str,
@@ -185,7 +185,7 @@ for video in sorted(videos_list):
     feature_distance_list[video_name] = []
 
 if not os.path.isdir(psnr_dir):
-    os.mkdir(psnr_dir)
+    os.makedirs(psnr_dir, exist_ok=True)
 
 ckpt = snapshot_path
 ckpt_name = ckpt.split('_')[-1]
@@ -221,7 +221,7 @@ with torch.no_grad():
         imgs = Variable(imgs).cuda()
 
         start_t = time.time()
-        outputs, feas, _, _, _, fea_loss = model.forward(
+        outputs, fea_loss = model.forward(
             imgs[:, :3 * 4], update_weights, False)
         end_t = time.time()
 
