@@ -75,10 +75,10 @@ class Meta_Prototype_3d(nn.Module):
 
     def forward(self, key, query, weights, train=True):
 
-        batch_size, dims, t, h, w = key.size()  # b X d X t X h X w
-        key = key.permute(0, 2, 3, 4, 1)  # b X t X h X w X d
-        _, _, t_, h_, w_ = query.size()
-        query = query.permute(0, 2, 3, 4, 1)  # b X t X h X w X d
+        batch_size, dims, h, w = key.size()  # b X d X h X w
+        key = key.permute(0, 2, 3, 1)  # b X h X w X d
+        _, _, h_, w_ = query.size()
+        query = query.permute(0, 2, 3, 1)  # b X h X w X d
         query = query.reshape((batch_size, -1, self.feature_dim))
         # train
         if train:
@@ -89,15 +89,15 @@ class Meta_Prototype_3d(nn.Module):
                     key, weights['prototype.Mheads.weight'])
 
             multi_heads_weights = multi_heads_weights.view(
-                (batch_size, t * h * w, self.proto_size, 1))
+                (batch_size, h * w, self.proto_size, 1))
 
             # softmax on weights
             multi_heads_weights = F.softmax(multi_heads_weights, dim=1)
 
-            key = key.reshape((batch_size, t * w * h, dims))
-            protos_cpu = multi_heads_weights.cpu() * key.unsqueeze(-2).cpu()
-            protos_cpu = protos_cpu.sum(1)
-            protos = protos_cpu.to(key.device)
+            # key = key.reshape((batch_size, w * h, dims))
+            # protos = (multi_heads_weights * key.unsqueeze(-2)).sum(1)
+            key = key.reshape((batch_size, 1, w * h, dims)).transpose(-1, -2)
+            protos = (key @ multi_heads_weights.transpose(1, 2)).squeeze()
 
             updated_query, fea_loss, cst_loss, dis_loss = self.query_loss(
                 query, protos, weights, train)
@@ -108,7 +108,7 @@ class Meta_Prototype_3d(nn.Module):
             # reshape
             updated_query = updated_query.permute(0, 2, 1)  # b X d X n
             updated_query = updated_query.view(
-                (batch_size, self.feature_dim, t_, h_, w_))
+                (batch_size, self.feature_dim, h_, w_))
             return updated_query, protos, fea_loss, cst_loss, dis_loss
 
         # test
@@ -165,8 +165,9 @@ class Meta_Prototype_3d(nn.Module):
             keys = F.normalize(keys, dim=-1)
             _, softmax_score_proto = self.get_score(keys, query)
 
-            new_query = softmax_score_proto.unsqueeze(-1) * keys.unsqueeze(1)
-            new_query = new_query.sum(2)
+            # new_query = softmax_score_proto.unsqueeze(-1) * keys.unsqueeze(1)
+            # new_query = new_query.sum(2)
+            new_query = (keys.unsqueeze(1).transpose(-1, -2) @ softmax_score_proto.unsqueeze(-1)).squeeze()
             new_query = F.normalize(new_query, dim=-1)
 
             # maintain the distinction among attribute vectors

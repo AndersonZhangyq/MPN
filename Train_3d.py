@@ -65,11 +65,11 @@ parser.add_argument('--segs',
                     help='num of video segments')
 parser.add_argument('--fdim',
                     type=list,
-                    default=[128],
+                    default=[64],
                     help='channel dimension of the features')
 parser.add_argument('--pdim',
                     type=list,
-                    default=[128],
+                    default=[64],
                     help='channel dimension of the prototypes')
 parser.add_argument('--psize',
                     type=int,
@@ -192,8 +192,10 @@ for epoch in range(start_epoch, args.epochs):
         prev_imgs = batch_data['prev']
         prev_imgs = torch.stack([torch.cat(ele) for ele in prev_imgs]).transpose(1, 2)
         pred_imgs = batch_data['pred']
-        pred_imgs = torch.cat(pred_imgs).cuda()
-        imgs = Variable(prev_imgs).cuda() # batch_size x channel x frame_len x h x w
+        pred_imgs = torch.cat(pred_imgs)
+        pred_imgs = pred_imgs.cuda()
+        imgs = Variable(prev_imgs) # batch_size x channel x frame_len x h x w
+        imgs = imgs.cuda()
 
         outputs, _, _, _, fea_loss, _, dis_loss = model.forward(
             imgs, None, True)
@@ -202,7 +204,7 @@ for epoch in range(start_epoch, args.epochs):
         fea_loss = fea_loss.mean()
         dis_loss = dis_loss.mean()
         loss_D = args.loss_fra_reconstruct * loss_pixel + args.loss_fea_reconstruct * fea_loss + args.loss_distinguish * dis_loss
-        loss_D.backward(retain_graph=True)
+        loss_D.backward()
         optimizer_D.step()
 
         loss_pix.update(args.loss_fra_reconstruct * loss_pixel.item(), 1)

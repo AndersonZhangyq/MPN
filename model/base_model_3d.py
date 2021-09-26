@@ -20,13 +20,13 @@ class Encoder(torch.nn.Module):
                                 out_channels=intOutput,
                                 kernel_size=3,
                                 stride=1,
-                                padding=1), torch.nn.BatchNorm3d(intOutput),
+                                padding=1),
                 torch.nn.ReLU(inplace=False),
                 torch.nn.Conv3d(in_channels=intOutput,
                                 out_channels=intOutput,
                                 kernel_size=3,
                                 stride=1,
-                                padding=1), torch.nn.BatchNorm3d(intOutput),
+                                padding=1),
                 torch.nn.ReLU(inplace=False))
 
         def Basic_(intInput, intOutput):
@@ -35,7 +35,7 @@ class Encoder(torch.nn.Module):
                                 out_channels=intOutput,
                                 kernel_size=3,
                                 stride=1,
-                                padding=1), torch.nn.BatchNorm3d(intOutput),
+                                padding=1),
                 torch.nn.ReLU(inplace=False),
                 torch.nn.Conv3d(in_channels=intOutput,
                                 out_channels=intOutput,
@@ -44,16 +44,16 @@ class Encoder(torch.nn.Module):
                                 padding=1),
             )
 
-        self.moduleConv1 = Basic(n_channel, 64)
+        self.moduleConv1 = Basic(n_channel, 32)
         self.modulePool1 = torch.nn.MaxPool3d(kernel_size=2, stride=2)
 
-        self.moduleConv2 = Basic(64, 128)
+        self.moduleConv2 = Basic(32, 64)
         self.modulePool2 = torch.nn.MaxPool3d(kernel_size=2, stride=2)
 
-        self.moduleConv3 = Basic(128, 256)
+        self.moduleConv3 = Basic(64, 128)
         self.modulePool3 = torch.nn.MaxPool3d(kernel_size=2, stride=2)
 
-        self.moduleConv4 = Basic_(256, 512)
+        self.moduleConv4 = Basic_(128, 256)
 
     def forward(self, x):
 
@@ -98,14 +98,14 @@ class Decoder_new(torch.nn.Module):
                                          output_padding=1),
                 torch.nn.ReLU(inplace=False))
 
-        self.moduleConv = Basic(512, 512)
-        self.moduleUpsample4 = Upsample(512, 256)
+        self.moduleConv = Basic(256, 256)
+        self.moduleUpsample4 = Upsample(256, 128)
 
-        self.moduleDeconv3 = Basic(512, 256)
-        self.moduleUpsample3 = Upsample(256, 128)
+        self.moduleDeconv3 = Basic(256, 128)
+        self.moduleUpsample3 = Upsample(128, 64)
 
-        self.moduleDeconv2 = Basic(256, 128)
-        self.moduleUpsample2 = Upsample(128, 64)
+        self.moduleDeconv2 = Basic(128, 64)
+        self.moduleUpsample2 = Upsample(64, 32)
 
     def forward(self, x, skip1, skip2, skip3):
 
@@ -159,7 +159,7 @@ class convAE(torch.nn.Module):
         self.prototype = Meta_Prototype_3d(proto_size, feature_dim, key_dim,
                                         temp_update, temp_gather)
         # output_head
-        self.ohead = Outhead(128, n_channel, 64)
+        self.ohead = Outhead(64, n_channel, 32)
         self.temporal_head = torch.nn.Linear(t_length - 1, 1)
 
     def set_learnable_params(self, layers):
@@ -191,10 +191,14 @@ class convAE(torch.nn.Module):
         new_fea = self.decoder(fea, skip1, skip2, skip3)
 
         new_fea = F.normalize(new_fea, dim=1)
+        batch_size, c, t, h, w = new_fea.size()
+
+        new_fea = new_fea.transpose(1, 2).reshape(batch_size * t, c, h, w)
 
         if train:
             updated_fea, keys, fea_loss, cst_loss, dis_loss = self.prototype(
                 new_fea, new_fea, weights, train)
+            updated_fea = updated_fea.reshape(batch_size, t, c, h, w).transpose(1, 2)
             if weights is None:
                 output = self.ohead(updated_fea)
             else:
@@ -246,6 +250,8 @@ class convAE(torch.nn.Module):
                            stride=1,
                            padding=1)
                 output = F.tanh(x)
+            temporal_output = output.transpose(2, -1)
+            temporal_output = self.temporal_head(temporal_output).squeeze(-1)
 
             return output, fea_loss
 
