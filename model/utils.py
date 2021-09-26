@@ -330,7 +330,7 @@ class Video3DDataset(VideoDataLoader):
                 image = np_load_frame(
                     self.videos[video_name]['frame'][frame_name + i],
                     self._resize_height, self._resize_width)
-                print("prev: {}\n".format(frame_name + i))
+                # print("prev: {}\n".format(frame_name + i))
                 if self.transform is not None:
                     cur_batch.append(self.transform(image))
             previous_frames.append(cur_batch)
@@ -338,7 +338,7 @@ class Video3DDataset(VideoDataLoader):
                 image = np_load_frame(
                     self.videos[video_name]['frame'][frame_name + self._time_step + i],
                     self._resize_height, self._resize_width)
-                print("pred: {}\n".format(frame_name + self._time_step + i))
+                # print("pred: {}\n".format(frame_name + self._time_step + i))
                 if self.transform is not None:
                     predict_frames.append(self.transform(image))
         return {"prev": previous_frames, "pred": predict_frames}

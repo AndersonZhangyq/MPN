@@ -94,10 +94,10 @@ class Meta_Prototype_3d(nn.Module):
             # softmax on weights
             multi_heads_weights = F.softmax(multi_heads_weights, dim=1)
 
-            # key = key.reshape((batch_size, w * h, dims))
-            # protos = (multi_heads_weights * key.unsqueeze(-2)).sum(1)
-            key = key.reshape((batch_size, 1, w * h, dims)).transpose(-1, -2)
-            protos = (key @ multi_heads_weights.transpose(1, 2)).squeeze()
+            key = key.reshape((batch_size, w * h, dims))
+            protos = (multi_heads_weights * key.unsqueeze(-2)).sum(1)
+            # key = key.reshape((batch_size, 1, w * h, dims)).transpose(-1, -2)
+            # protos = (key @ multi_heads_weights.transpose(1, 2)).squeeze()
 
             updated_query, fea_loss, cst_loss, dis_loss = self.query_loss(
                 query, protos, weights, train)
@@ -146,8 +146,8 @@ class Meta_Prototype_3d(nn.Module):
         if train:
 
             # Distinction constrain
-            keys_ = F.normalize(keys, dim=-1)
-            dis = 1 - distance(keys_.unsqueeze(1), keys_.unsqueeze(2))
+            keys = F.normalize(keys, dim=-1)
+            dis = 1 - distance(keys.unsqueeze(1), keys.unsqueeze(2))
 
             mask = dis > 0
             dis *= mask.float()
@@ -157,18 +157,19 @@ class Meta_Prototype_3d(nn.Module):
             dis_loss = dis_loss.mean()
 
             # maintain the consistance of same attribute vector
-            cst_loss = mean_distance(keys_[1:], keys_[:-1])
+            cst_loss = mean_distance(keys[1:], keys[:-1])
 
             # Normal constrain
             loss_mse = torch.nn.MSELoss()
 
-            keys = F.normalize(keys, dim=-1)
+            # keys = F.normalize(keys, dim=-1)
             _, softmax_score_proto = self.get_score(keys, query)
 
-            # new_query = softmax_score_proto.unsqueeze(-1) * keys.unsqueeze(1)
-            # new_query = new_query.sum(2)
-            new_query = (keys.unsqueeze(1).transpose(-1, -2) @ softmax_score_proto.unsqueeze(-1)).squeeze()
-            new_query = F.normalize(new_query, dim=-1)
+            # torch.Size([32, 65536, 64])
+            new_query = softmax_score_proto.unsqueeze(-1) * keys.unsqueeze(1)
+            new_query = new_query.sum(2)
+            # new_query = (keys.unsqueeze(1).transpose(-1, -2) @ softmax_score_proto.unsqueeze(-1)).squeeze()
+            # new_query = F.normalize(new_query, dim=-1)
 
             # maintain the distinction among attribute vectors
             _, gathering_indices = torch.topk(softmax_score_proto, 2, dim=-1)

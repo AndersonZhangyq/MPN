@@ -194,7 +194,6 @@ class convAE(torch.nn.Module):
         batch_size, c, t, h, w = new_fea.size()
 
         new_fea = new_fea.transpose(1, 2).reshape(batch_size * t, c, h, w)
-
         if train:
             updated_fea, keys, fea_loss, cst_loss, dis_loss = self.prototype(
                 new_fea, new_fea, weights, train)
@@ -203,25 +202,26 @@ class convAE(torch.nn.Module):
                 output = self.ohead(updated_fea)
             else:
                 x = conv3d(updated_fea,
-                           weights['ohead.0.weight'],
-                           weights['ohead.0.bias'],
-                           stride=1,
-                           padding=1)
+                        weights['ohead.0.weight'],
+                        weights['ohead.0.bias'],
+                        stride=1,
+                        padding=1)
                 x = relu(x)
                 x = conv3d(x,
-                           weights['ohead.2.weight'],
-                           weights['ohead.2.bias'],
-                           stride=1,
-                           padding=1)
+                        weights['ohead.2.weight'],
+                        weights['ohead.2.bias'],
+                        stride=1,
+                        padding=1)
                 x = relu(x)
                 x = conv3d(x,
-                           weights['ohead.4.weight'],
-                           weights['ohead.4.bias'],
-                           stride=1,
-                           padding=1)
+                        weights['ohead.4.weight'],
+                        weights['ohead.4.bias'],
+                        stride=1,
+                        padding=1)
                 output = F.tanh(x)
             temporal_output = output.transpose(2, -1)
             temporal_output = self.temporal_head(temporal_output).squeeze(-1)
+            # return None, fea, None, keys, None, None, None
 
             return temporal_output, fea, updated_fea, keys, fea_loss, cst_loss, dis_loss
 
