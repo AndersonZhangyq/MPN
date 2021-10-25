@@ -4,8 +4,10 @@ import os
 import glob
 import cv2
 import torch.utils.data as data
+import torch
 import random
 import pickle
+from torchvision import transforms
 
 rng = np.random.RandomState(2020)
 
@@ -34,7 +36,9 @@ class DataLoader(data.Dataset):
                  resize_height,
                  resize_width,
                  time_step=4,
-                 num_pred=1):
+                 num_pred=1,
+                 seperate_time=False):
+        self.seperate_time = seperate_time
         self.dir = video_folder
         self.transform = transform
         self.videos = OrderedDict()
@@ -86,7 +90,10 @@ class DataLoader(data.Dataset):
             if self.transform is not None:
                 batch.append(self.transform(image))
 
-        return np.concatenate(batch, axis=0)
+        if self.seperate_time:
+            return np.stack(batch, axis=0)
+        else:
+            return np.concatenate(batch, axis=0)
 
     def __len__(self):
         return len(self.samples)

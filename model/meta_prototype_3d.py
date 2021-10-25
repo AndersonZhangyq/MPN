@@ -47,7 +47,8 @@ class Meta_Prototype_3d(nn.Module):
                  key_dim,
                  temp_update,
                  temp_gather,
-                 shrink_thres=0):
+                 shrink_thres=0,
+                 need_act=False):
         super(Meta_Prototype_3d, self).__init__()
         # Constants
         self.proto_size = proto_size
@@ -55,6 +56,7 @@ class Meta_Prototype_3d(nn.Module):
         self.key_dim = key_dim
         self.temp_update = temp_update
         self.temp_gather = temp_gather
+        self.need_act = need_act
         # multi-head
         self.Mheads = nn.Linear(key_dim, proto_size, bias=False)
         # self.Dim_reduction = nn.Linear(key_dim, feature_dim)
@@ -139,6 +141,12 @@ class Meta_Prototype_3d(nn.Module):
             updated_query = updated_query.permute(0, 2, 1)  # b X d X n
             updated_query = updated_query.view(
                 (batch_size, self.feature_dim, h_, w_))
+            if self.need_act:
+                multi_heads_weights = multi_heads_weights.view(
+                    (batch_size, h, w, self.proto_size)
+                )
+                multi_heads_weights = multi_heads_weights.permute(0, 3, 1, 2)
+                return updated_query, protos, query, fea_loss, multi_heads_weights
             return updated_query, protos, query, fea_loss
 
     def query_loss(self, query, keys, weights, train):

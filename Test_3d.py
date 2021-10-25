@@ -1,37 +1,21 @@
 import numpy as np
 import os
-import sys
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-import torchvision
-import torch.nn.init as init
 import torch.utils.data as data
-import torch.utils.data.dataset as dataset
-import torchvision.datasets as dset
 import torchvision.transforms as transforms
 from torch.autograd import Variable
-import torchvision.utils as v_utils
 import matplotlib
-import cv2
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import cv2
-import math
 from collections import OrderedDict
-import copy
 import time
 from model.utils import DataLoader
-from model.base_model import *
-from sklearn.metrics import roc_auc_score
+from model.base_model_3d import *
 from utils import *
-import random
 import glob
 from tqdm import tqdm
 import argparse
-import pdb
 import warnings
 import time
 
@@ -55,15 +39,15 @@ parser.add_argument('--w', type=int, default=256, help='width of input images')
 parser.add_argument('--c', type=int, default=3, help='channel of input images')
 parser.add_argument('--t_length',
                     type=int,
-                    default=5,
+                    default=9,
                     help='length of the frame sequences')
 parser.add_argument('--fdim',
                     type=list,
-                    default=[128],
+                    default=[64],
                     help='channel dimension of the features')
 parser.add_argument('--pdim',
                     type=list,
-                    default=[128],
+                    default=[64],
                     help='channel dimension of the prototypes')
 parser.add_argument('--psize',
                     type=int,
@@ -87,7 +71,7 @@ parser.add_argument('--th',
                     help='threshold for test updating')
 parser.add_argument('--num_workers_test',
                     type=int,
-                    default=0,
+                    default=8,
                     help='number of workers for the test loader')
 parser.add_argument('--dataset_type',
                     type=str,
@@ -124,7 +108,8 @@ test_dataset = DataLoader(test_folder,
                           ]),
                           resize_height=args.h,
                           resize_width=args.w,
-                          time_step=args.t_length - 1)
+                          time_step=args.t_length - 1,
+                          seperate_time=True)
 
 test_size = len(test_dataset)
 
@@ -136,8 +121,8 @@ test_batch = data.DataLoader(test_dataset,
 
 loss_func_mse = nn.MSELoss(reduction='none')
 
-model = convAE(args.c, args.t_length, args.psize, args.fdim[0], args.pdim[0])
-model.cuda()
+model = convAE(args.c, args.t_length, args.psize, args.fdim[0], args.pdim[0], need_act=True)
+
 
 dataset_type = args.dataset_type if args.dataset_type != 'SHTech' else 'shanghai'
 labels = np.load('./data/frame_labels_' + dataset_type + '.npy')
@@ -178,9 +163,8 @@ for video in sorted(videos_list):
     video_name = video.split('/')[-1]
     videos[video_name]['labels'] = labels[0][
         4 + label_length:videos[video_name]['length'] + label_length]
-    label_per_video[video_name] = labels[
-        0][args.t_length + args.K_hots - 1 +
-           label_length:videos[video_name]['length'] + label_length]
+    label_per_video[video_name] = labels[0][args.t_length + args.K_hots - 1 +
+                  label_length:videos[video_name]['length'] + label_length]
     labels_list = np.append(
         labels_list,
         labels[0][args.t_length + args.K_hots - 1 +
@@ -196,9 +180,12 @@ ckpt = snapshot_path
 ckpt_name = ckpt.split('_')[-1]
 ckpt_id = int(ckpt.split('/')[-1].split('_')[-1][:-4])
 # Loading the trained model
-model = torch.load(ckpt)
-if type(model) is dict:
-    model = model['state_dict']
+saved_model = torch.load(ckpt)
+if type(saved_model) is dict:
+    model.load_state_dict(saved_model['state_dict'].state_dict())
+else:
+    print("Failed to load save model")
+    exit(0)
 model.cuda()
 model.eval()
 
@@ -222,24 +209,26 @@ pbar = tqdm(
 )
 from torchvision import transforms
 toPILImage = transforms.ToPILImage()
-output_path = "result_predict/ped2/"
+output_path = os.path.join("result_3d_predict", args.dataset_type, os.path.basename(args.model_dir))
 os.makedirs(output_path, exist_ok=True)
 image_id = 0
 with torch.no_grad():
     for k, (imgs) in enumerate(test_batch):
         hidden_state = None
-        imgs = Variable(imgs).cuda()
+        prev_imgs = Variable(imgs[:, :(args.t_length - 1)]).transpose(1, 2).cuda()
+        pred_imgs = Variable(imgs[:, -1:]).squeeze(1).cuda()
 
         start_t = time.time()
-        outputs, fea_loss = model.forward(imgs[:, :3 * 4], update_weights,
-                                          False)
+        outputs, fea_loss, act = model.forward(
+            prev_imgs, update_weights, False)
         end_t = time.time()
+        act = act.cpu()
 
         if k >= len(test_batch) // 2:
             forward_time.update(end_t - start_t, 1)
         # import pdb;pdb.set_trace()
         # outputs = torch.cat(pred,1)
-        mse_imgs = loss_func_mse((outputs[:] + 1) / 2, (imgs[:, -3:] + 1) / 2)
+        mse_imgs = loss_func_mse((outputs[:] + 1) / 2, (pred_imgs + 1) / 2)
         mse_img_save = mse_imgs.detach().cpu().clone()
         mse_feas = fea_loss.mean(-1)
 
@@ -258,16 +247,28 @@ with torch.no_grad():
             feature_distance_list[videos_list[vdd].split('/')[-1]].append(
                 fea_score)
             k_iter += 1
-            cur_mse_img = mse_img_save[j]
-            cur_mse_img = (cur_mse_img - cur_mse_img.min()) / (cur_mse_img.max() - cur_mse_img.min())
-            cur_mse_img = cv2.applyColorMap((cur_mse_img.mean(0).numpy() * 255).astype(np.uint8), cv2.COLORMAP_JET)
-            total = torch.cat((outputs[j].detach().cpu(), imgs[j, -3:].detach().cpu()), dim=-1)
-            total_img = toPILImage(total)
-            total_img = cv2.cvtColor(np.array(total_img), cv2.COLOR_RGB2BGR)
-            video_name = videos_list[video_num].split('/')[-1]
-            total_img = np.concatenate((total_img, cur_mse_img), axis=1)
-            os.makedirs(os.path.join(output_path, video_name), exist_ok=True)
-            cv2.imwrite(os.path.join(output_path, video_name, "{:06d}.jpg".format(image_id)), total_img)
+#             cur_mse_img = mse_img_save[j]
+#             cur_mse_img = (cur_mse_img - cur_mse_img.min()) / (cur_mse_img.max() - cur_mse_img.min())
+#             cur_mse_img = cv2.applyColorMap((cur_mse_img.mean(0).numpy() * 255).astype(np.uint8), cv2.COLORMAP_JET)
+#             total_img = torch.cat(((outputs[j].detach().cpu() + 1) * 127.5, (pred_imgs[j].detach().cpu() + 1) * 127.5), dim=-1)
+#             total_img = total_img.permute(1, 2, 0)
+#             total_img = cv2.cvtColor(np.array(total_img), cv2.COLOR_RGB2BGR)
+#             video_name = videos_list[video_num].split('/')[-1]
+#             total_img = np.concatenate((total_img, cur_mse_img), axis=1)
+#             os.makedirs(os.path.join(output_path, video_name), exist_ok=True)
+#             cv2.imwrite(os.path.join(output_path, video_name, "{:06d}.jpg".format(k_iter)), total_img)
+#             for m in range(act.size(0)):
+#                 cur_img = (prev_imgs[j, :, m] + 1) * 127.5
+#                 cur_img = cur_img.cpu().permute(1, 2, 0)
+#                 cur_img = cv2.cvtColor(np.array(cur_img).astype(np.uint8), cv2.COLOR_RGB2BGR)
+#                 for n in range(act.size(1)):
+#                     cur_act = act[m, n]
+#                     cur_act = (cur_act - cur_act.min()) / (cur_act.max() - cur_act.min())
+#                     cur_act = cv2.applyColorMap((cur_act.numpy() * 255).astype(np.uint8), cv2.COLORMAP_JET)
+#                     added_img = cv2.addWeighted(cur_img, 0.6, cur_act, 0.4, 0)
+#                     cated_img = np.concatenate((cur_img, cur_act, added_img), axis=1)
+#                     os.makedirs(os.path.join(output_path, video_name, "act"), exist_ok=True)
+#                     cv2.imwrite(os.path.join(output_path, video_name, "act", "{:06d}-{}-{:02d}.jpg".format(k_iter, m, n)), cated_img)
             image_id += 1
             if k_iter == videos[videos_list[video_num].split('/')
                                 [-1]]['length'] - args.t_length + 1:
@@ -311,8 +312,7 @@ anomaly_score_total = np.asarray(anomaly_score_total_list)
 np.save(os.path.join(psnr_dir, "anomaly_score_total.npy"), anomaly_score_total)
 np.save(os.path.join(psnr_dir, "gt.npy"), np.expand_dims(1 - labels_list, 0))
 import pickle
-with open(os.path.join(psnr_dir, "anomaly_score_per_video.pickle"),
-          "wb+") as f:
+with open(os.path.join(psnr_dir, "anomaly_score_per_video.pickle"), "wb+") as f:
     pickle.dump(anomaly_score_per_video, f)
 with open(os.path.join(psnr_dir, "label_per_video.pickle"), "wb+") as f:
     pickle.dump(label_per_video, f)

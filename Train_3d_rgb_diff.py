@@ -12,7 +12,7 @@ import matplotlib
 from datetime import datetime
 from torch.utils.tensorboard import SummaryWriter
 matplotlib.use("Agg")
-from model.base_model_3d import *
+from model.base_model_rgb_diff import *
 from tqdm import tqdm
 import argparse
 import warnings
@@ -32,7 +32,7 @@ parser.add_argument('--test_batch_size',
                     help='batch size for test')
 parser.add_argument('--epochs',
                     type=int,
-                    default=1000,
+                    default=30000,
                     help='number of epochs for training')
 parser.add_argument('--loss_fra_reconstruct',
                     type=float,
@@ -82,7 +82,7 @@ parser.add_argument('--alpha',
                     help='weight for the anomality score')
 parser.add_argument('--num_workers',
                     type=int,
-                    default=8,
+                    default=0,
                     help='number of workers for the train loader')
 parser.add_argument('--num_workers_test',
                     type=int,
@@ -262,7 +262,7 @@ for epoch in range(start_epoch, args.epochs):
     loss_dis.reset()
 
     # Save the model
-    if epoch % 10 == 0:
+    if epoch % 100 == 0:
 
         if args.gpus is not None and len(args.gpus[0]) > 1:
             model_save = model.module

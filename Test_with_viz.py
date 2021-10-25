@@ -1,37 +1,22 @@
 import numpy as np
 import os
-import sys
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-import torchvision
-import torch.nn.init as init
 import torch.utils.data as data
-import torch.utils.data.dataset as dataset
-import torchvision.datasets as dset
 import torchvision.transforms as transforms
 from torch.autograd import Variable
-import torchvision.utils as v_utils
 import matplotlib
 import cv2
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import cv2
-import math
 from collections import OrderedDict
-import copy
 import time
 from model.utils import DataLoader
 from model.base_model import *
-from sklearn.metrics import roc_auc_score
 from utils import *
-import random
 import glob
 from tqdm import tqdm
 import argparse
-import pdb
 import warnings
 import time
 
@@ -87,7 +72,7 @@ parser.add_argument('--th',
                     help='threshold for test updating')
 parser.add_argument('--num_workers_test',
                     type=int,
-                    default=0,
+                    default=8,
                     help='number of workers for the test loader')
 parser.add_argument('--dataset_type',
                     type=str,

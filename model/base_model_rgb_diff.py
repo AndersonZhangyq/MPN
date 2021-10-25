@@ -1,13 +1,183 @@
 import numpy as np
 import torch
+from torch import nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from collections import OrderedDict
 from .meta_prototype_3d import Meta_Prototype_3d
-from .layers import conv3d, leakyrelu
+from .layers import conv3d, relu
 from matplotlib import pyplot as plt
 import pandas as pd
 import seaborn as sns
+
+def conv2d_relu_bn(in_channel, out_channel, kernel_size, stride=1, padding=0):
+    return nn.Sequential(
+        nn.Conv2d(in_channels=in_channel,
+                  out_channels=out_channel,
+                  kernel_size=kernel_size,
+                  stride=stride,
+                  padding=padding), nn.ReLU(), nn.BatchNorm2d(out_channel))
+
+
+def convtranspose2d_relu_bn(in_channel,
+                            out_channel,
+                            kernel_size,
+                            stride=1,
+                            padding=0):
+    return nn.Sequential(
+        nn.ConvTranspose2d(in_channels=in_channel,
+                           out_channels=out_channel,
+                           kernel_size=kernel_size,
+                           stride=stride,
+                           padding=padding), nn.ReLU(),
+        nn.BatchNorm2d(out_channel))
+
+
+class MotionPath(nn.Module):
+    def __init__(self, frame_num, k, use_memory=False) -> None:
+        super(MotionPath, self).__init__()
+        self.encoder_conv1 = conv2d_relu_bn(in_channel=frame_num,
+                                            out_channel=128,
+                                            kernel_size=3,
+                                            stride=2,
+                                            padding=1)
+        self.encoder_conv2 = conv2d_relu_bn(in_channel=128,
+                                            out_channel=256,
+                                            kernel_size=3,
+                                            stride=2,
+                                            padding=1)
+        self.memory = None
+        if use_memory:
+            self.memory = AttMemonry(256, k)
+
+        self.mid_conv = conv2d_relu_bn(in_channel=256,
+                                       out_channel=256,
+                                       kernel_size=3,
+                                       padding=1)
+        self.decoder_conv1 = convtranspose2d_relu_bn(in_channel=256,
+                                                     out_channel=128,
+                                                     kernel_size=2,
+                                                     stride=2)
+        self.decoder_conv2 = convtranspose2d_relu_bn(in_channel=128,
+                                                     out_channel=frame_num,
+                                                     kernel_size=2,
+                                                     stride=2)
+        self.conv1x1 = nn.Conv2d(in_channels=256,
+                                 out_channels=1,
+                                 kernel_size=1)
+
+        self.memory = AttMemonry(256, k)
+
+    def forward(self, input_x):
+        x_1 = self.encoder_conv1(input_x)
+        x_2 = self.encoder_conv2(x_1)
+        omega_hat = None
+        if self.memory is not None:
+            x_atted, omega_hat = self.memory(x_2)
+            x_3 = self.mid_conv(x_atted)
+        else:
+            x_3 = self.mid_conv(x_2)
+        x_4 = self.decoder_conv1(x_3)
+        x_5 = self.decoder_conv2(x_4)
+        return x_5, omega_hat
+
+
+class AttMemonry(nn.Module):
+    def __init__(self, dim, k) -> None:
+        super(AttMemonry, self).__init__()
+        memory_param = torch.empty(k, dim)
+        nn.init.normal_(memory_param)
+        self.register_parameter('memory', nn.Parameter(memory_param))
+        self.register_buffer('lambda_hyper', torch.tensor(2 / k))
+        self.dim = dim
+        pass
+
+    def forward(self, input):
+        assert (input.size(1) == self.dim)
+        bs, _, h, w = input.shape
+        x = input.permute(0, 2, 3, 1).reshape(-1, self.dim)
+        # cos_sim = x / torch.max(
+        #     torch.zeros_like(x) + 1e-8, x.norm(
+        #         2, dim=-1, keepdim=True)) @ (self.memory / torch.max(
+        #             torch.zeros_like(self.memory) + 1e-8,
+        #             self.memory.norm(2, dim=-1, keepdim=True))).T
+        cos_sim = x @ self.memory.T
+        omega = F.softmax(cos_sim)
+        omega_hat = (F.relu(omega - self.lambda_hyper) *
+                     omega) / (torch.abs(omega - self.lambda_hyper) + 1e-8)
+        omega_hat = F.normalize(omega_hat, p=1, dim=1)
+        x_rec = omega_hat @ self.memory
+        x_rec = x_rec.reshape(bs, h, w, self.dim).permute(0, 3, 1, 2)
+        return x_rec, omega_hat
+
+
+class SpatialPath(nn.Module):
+    def __init__(self, k, use_memory=False) -> None:
+        super(SpatialPath, self).__init__()
+        self.encoder_conv1 = conv2d_relu_bn(in_channel=1,
+                                            out_channel=64,
+                                            kernel_size=3,
+                                            stride=2,
+                                            padding=1)
+        self.encoder_conv2 = conv2d_relu_bn(in_channel=64,
+                                            out_channel=128,
+                                            kernel_size=3,
+                                            stride=2,
+                                            padding=1)
+        self.memory = None
+        if use_memory:
+            self.memory = AttMemonry(128, k)
+
+        self.mid_conv = conv2d_relu_bn(in_channel=128,
+                                       out_channel=128,
+                                       kernel_size=3,
+                                       padding=1)
+        self.decoder_conv1 = convtranspose2d_relu_bn(in_channel=128,
+                                                     out_channel=64,
+                                                     kernel_size=2,
+                                                     stride=2)
+        self.decoder_conv2 = convtranspose2d_relu_bn(in_channel=64,
+                                                     out_channel=1,
+                                                     kernel_size=2,
+                                                     stride=2)
+
+    def forward(self, input_x):
+        x_1 = self.encoder_conv1(input_x)
+        x_2 = self.encoder_conv2(x_1)
+        omega_hat = None
+        if self.memory is not None:
+            x_atted, omega_hat = self.memory(x_2)
+            x_3 = self.mid_conv(x_atted)
+        else:
+            x_3 = self.mid_conv(x_2)
+        x_4 = self.decoder_conv1(x_3)
+        x_5 = self.decoder_conv2(x_4)
+        return x_5, omega_hat
+
+class ClusterDrivenAutoEncoder(nn.Module):
+    def __init__(self,
+                 frame_num,
+                 alpha=0.0002,
+                 k=500,
+                 use_memory=False):
+        super().__init__()
+        self.motion = MotionPath(frame_num=frame_num - 1,
+                                 k=k,
+                                 use_memory=use_memory)
+        self.spatial = SpatialPath(k=k, use_memory=use_memory)
+        self.register_buffer("alpha", torch.tensor(alpha))
+    
+    def forward(self, x):
+        frames = x
+        frames = torch.cat(frames, dim=1)
+        spatial_input = frames[:, -1, :].unsqueeze(1)
+        motion_input = frames[:, :-1, :] - spatial_input
+        f_motion, motion_omega_hat = self.motion(motion_input)
+        f_spatial, spatial_omega_hat = self.spatial(spatial_input)
+        if self.training:
+            return spatial_input, motion_input, f_motion, f_spatial, spatial_omega_hat, motion_omega_hat
+        else:
+            return spatial_input, motion_input, f_motion, f_spatial
 
 
 class Encoder(torch.nn.Module):
@@ -20,12 +190,14 @@ class Encoder(torch.nn.Module):
                                 out_channels=intOutput,
                                 kernel_size=3,
                                 stride=1,
-                                padding=1), torch.nn.LeakyReLU(inplace=False),
+                                padding=1),
+                torch.nn.ReLU(inplace=False),
                 torch.nn.Conv3d(in_channels=intOutput,
                                 out_channels=intOutput,
                                 kernel_size=3,
                                 stride=1,
-                                padding=1), torch.nn.LeakyReLU(inplace=False))
+                                padding=1),
+                torch.nn.ReLU(inplace=False))
 
         def Basic_(intInput, intOutput):
             return torch.nn.Sequential(
@@ -34,7 +206,7 @@ class Encoder(torch.nn.Module):
                                 kernel_size=3,
                                 stride=1,
                                 padding=1),
-                torch.nn.LeakyReLU(inplace=False),
+                torch.nn.ReLU(inplace=False),
                 torch.nn.Conv3d(in_channels=intOutput,
                                 out_channels=intOutput,
                                 kernel_size=3,
@@ -79,12 +251,12 @@ class Decoder_new(torch.nn.Module):
                                 out_channels=intOutput,
                                 kernel_size=3,
                                 stride=1,
-                                padding=1), torch.nn.LeakyReLU(inplace=False),
+                                padding=1), torch.nn.ReLU(inplace=False),
                 torch.nn.Conv3d(in_channels=intOutput,
                                 out_channels=intOutput,
                                 kernel_size=3,
                                 stride=1,
-                                padding=1), torch.nn.LeakyReLU(inplace=False))
+                                padding=1), torch.nn.ReLU(inplace=False))
 
         def Upsample(nc, intOutput):
             return torch.nn.Sequential(
@@ -94,7 +266,7 @@ class Decoder_new(torch.nn.Module):
                                          stride=2,
                                          padding=1,
                                          output_padding=1),
-                torch.nn.LeakyReLU(inplace=False))
+                torch.nn.ReLU(inplace=False))
 
         self.moduleConv = Basic(256, 256)
         self.moduleUpsample4 = Upsample(256, 128)
@@ -131,8 +303,7 @@ class convAE(torch.nn.Module):
                  feature_dim=512,
                  key_dim=512,
                  temp_update=0.1,
-                 temp_gather=0.1,
-                 need_act=False):
+                 temp_gather=0.1):
         super(convAE, self).__init__()
 
         def Outhead(intInput, intOutput, nc):
@@ -141,35 +312,25 @@ class convAE(torch.nn.Module):
                                 out_channels=nc,
                                 kernel_size=3,
                                 stride=1,
-                                padding=1), torch.nn.LeakyReLU(inplace=False),
+                                padding=1), torch.nn.ReLU(inplace=False),
                 torch.nn.Conv3d(in_channels=nc,
                                 out_channels=nc,
                                 kernel_size=3,
                                 stride=1,
-                                padding=1), torch.nn.LeakyReLU(inplace=False),
+                                padding=1), torch.nn.ReLU(inplace=False),
                 torch.nn.Conv3d(in_channels=nc,
                                 out_channels=intOutput,
                                 kernel_size=3,
                                 stride=1,
-                                padding=1), torch.nn.LeakyReLU(inplace=False))
+                                padding=1), torch.nn.Tanh())
 
         self.encoder = Encoder(t_length, n_channel)
         self.decoder = Decoder_new(t_length, n_channel)
-        self.prototype = Meta_Prototype_3d(proto_size,
-                                           feature_dim,
-                                           key_dim,
-                                           temp_update,
-                                           temp_gather,
-                                           need_act=need_act)
-        self.need_act = need_act
+        self.prototype = Meta_Prototype_3d(proto_size, feature_dim, key_dim,
+                                        temp_update, temp_gather)
         # output_head
         self.ohead = Outhead(64, n_channel, 32)
-        self.temporal_head = torch.nn.Sequential(
-            torch.nn.Conv3d(t_length - 1,
-                            1,
-                            kernel_size=(3, 1, 1),
-                            stride=1,
-                            padding=(1, 0, 0)), torch.nn.Tanh())
+        self.temporal_head = torch.nn.Linear(t_length - 1, 1)
 
     def set_learnable_params(self, layers):
         for k, p in self.named_parameters():
@@ -206,44 +367,39 @@ class convAE(torch.nn.Module):
         if train:
             updated_fea, keys, fea_loss, cst_loss, dis_loss = self.prototype(
                 new_fea, new_fea, weights, train)
-            updated_fea = updated_fea.reshape(batch_size, t, c, h,
-                                              w).transpose(1, 2)
+            updated_fea = updated_fea.reshape(batch_size, t, c, h, w).transpose(1, 2)
             if weights is None:
                 output = self.ohead(updated_fea)
             else:
                 x = conv3d(updated_fea,
-                           weights['ohead.0.weight'],
-                           weights['ohead.0.bias'],
-                           stride=1,
-                           padding=1)
-                x = leakyrelu(x)
+                        weights['ohead.0.weight'],
+                        weights['ohead.0.bias'],
+                        stride=1,
+                        padding=1)
+                x = relu(x)
                 x = conv3d(x,
-                           weights['ohead.2.weight'],
-                           weights['ohead.2.bias'],
-                           stride=1,
-                           padding=1)
-                x = leakyrelu(x)
+                        weights['ohead.2.weight'],
+                        weights['ohead.2.bias'],
+                        stride=1,
+                        padding=1)
+                x = relu(x)
                 x = conv3d(x,
-                           weights['ohead.4.weight'],
-                           weights['ohead.4.bias'],
-                           stride=1,
-                           padding=1)
-            temporal_output = output.transpose(1, 2)
-            temporal_output = self.temporal_head(temporal_output)
-            temporal_output = temporal_output.squeeze(1)
+                        weights['ohead.4.weight'],
+                        weights['ohead.4.bias'],
+                        stride=1,
+                        padding=1)
+                output = F.tanh(x)
+            temporal_output = output.transpose(2, -1)
+            temporal_output = self.temporal_head(temporal_output).squeeze(-1)
             # return None, fea, None, keys, None, None, None
 
             return temporal_output, fea, updated_fea, keys, fea_loss, cst_loss, dis_loss
 
         # test
         else:
-            ret = self.prototype(new_fea, new_fea, weights, train)
-            if self.need_act:
-                updated_fea, keys, query, fea_loss, act = ret
-            else:
-                updated_fea, keys, query, fea_loss = ret
-            updated_fea = updated_fea.reshape(batch_size, t, c, h,
-                                              w).transpose(1, 2)
+            updated_fea, keys, query, fea_loss = self.prototype(
+                new_fea, new_fea, weights, train)
+            updated_fea = updated_fea.reshape(batch_size, t, c, h, w).transpose(1, 2)
             if weights is None:
                 output = self.ohead(updated_fea)
             else:
@@ -252,24 +408,22 @@ class convAE(torch.nn.Module):
                            weights['ohead.0.bias'],
                            stride=1,
                            padding=1)
-                x = leakyrelu(x)
+                x = relu(x)
                 x = conv3d(x,
                            weights['ohead.2.weight'],
                            weights['ohead.2.bias'],
                            stride=1,
                            padding=1)
-                x = leakyrelu(x)
+                x = relu(x)
                 x = conv3d(x,
                            weights['ohead.4.weight'],
                            weights['ohead.4.bias'],
                            stride=1,
                            padding=1)
-            temporal_output = output.transpose(1, 2)
-            temporal_output = self.temporal_head(temporal_output)
-            temporal_output = temporal_output.squeeze(1)
+                output = F.tanh(x)
+            temporal_output = output.transpose(2, -1)
+            temporal_output = self.temporal_head(temporal_output).squeeze(-1)
 
-            if self.need_act:
-                return temporal_output, fea_loss, act
             return temporal_output, fea_loss
 
 

@@ -55,7 +55,10 @@ def conv_transpose3d(input,
 
 
 def relu(input):
-    return F.threshold(input, 0, 0, inplace=False)
+    return F.relu(input, inplace=False)
+
+def leakyrelu(input):
+    return F.leaky_relu(input, inplace=False)
 
 
 def dropout(input, p=0.8, training=True):
